@@ -73,7 +73,7 @@ function setupEventListeners() {
     });
 
     minGainRange.addEventListener("input", (e) => {
-        minGainVal.textContent = "±" + e.target.value + "%";
+        minGainVal.textContent = "+" + e.target.value + "%";
         applyFiltersAndRender();
     });
 
@@ -175,25 +175,58 @@ async function fetchData() {
         const maxFloat = maxFloatInput.value || 25.0;
         const allowUnknown = allowUnknownFloatCheckbox.checked;
 
-        const url = `/api/screen?min_price=${minPrice}&max_price=${maxPrice}&min_rel_vol=${minRelVol}&min_gain=${minGain}&min_float=${minFloat}&max_float=${maxFloat}&allow_unknown_float=${allowUnknown}`;
+        const baseParams = `min_price=${minPrice}&max_price=${maxPrice}&min_rel_vol=${minRelVol}&min_gain=${minGain}&min_float=${minFloat}&max_float=${maxFloat}&allow_unknown_float=${allowUnknown}&limit=60`;
+
+        let accumulatedStocks = [];
+        let totalScannedSum = 0;
+        const startTimeTotal = performance.now();
+
+        const chunkOffsets = [0, 60, 120, 180, 240];
         
-        const res = await fetch(url);
-        const data = await res.json();
+        // Fetch first chunk immediately to render initial state fast
+        const res0 = await fetch(`/api/screen?${baseParams}&offset=0`);
+        const data0 = await res0.json();
         
-        rawData = data.stocks || [];
+        updateMarketStatusUI(data0.market_session);
         
-        updateMarketStatusUI(data.market_session);
+        accumulatedStocks = [...(data0.stocks || [])];
+        totalScannedSum = data0.chunk_size || 60;
         
-        statScanned.textContent = data.total_scanned;
-        statPassed.textContent = data.total_passed;
-        statTime.textContent = data.execution_time_seconds + "s";
-        
+        rawData = [...accumulatedStocks];
+        statScanned.textContent = totalScannedSum;
+        statPassed.textContent = rawData.length;
+        statTime.textContent = ((performance.now() - startTimeTotal) / 1000).toFixed(1) + "s";
+        populateDropdowns(rawData);
+        applyFiltersAndRender();
+
+        // Fetch background chunks (scanning 300 tickers total per cycle)
+        const backgroundPromises = chunkOffsets.slice(1).map(offset => 
+            fetch(`/api/screen?${baseParams}&offset=${offset}`).then(r => r.json()).catch(() => null)
+        );
+
+        const backgroundResults = await Promise.all(backgroundPromises);
+        backgroundResults.forEach(res => {
+            if (res && res.stocks) {
+                accumulatedStocks.push(...res.stocks);
+                totalScannedSum += res.chunk_size || 60;
+            }
+        });
+
+        const stockMap = new Map();
+        accumulatedStocks.forEach(s => stockMap.set(s.ticker, s));
+        rawData = Array.from(stockMap.values());
+
+        statScanned.textContent = totalScannedSum;
+        statPassed.textContent = rawData.length;
+        statTime.textContent = ((performance.now() - startTimeTotal) / 1000).toFixed(1) + "s";
         populateDropdowns(rawData);
         applyFiltersAndRender();
         
     } catch (err) {
         console.error("Failed to fetch screener data:", err);
-        screenedTbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i> Error loading screener data. Server ready?</td></tr>`;
+        if (rawData.length === 0) {
+            screenedTbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i> Error loading screener data. Server ready?</td></tr>`;
+        }
     } finally {
         scanBtnIcon.classList.remove("fa-spin");
     }
@@ -304,99 +337,96 @@ function applyFiltersAndRender() {
 
 function renderTable(stocks) {
     if (stocks.length === 0) {
-        screenedTbody.innerHTML = `
-            <tr>
-                <td colspan="10" class="empty-state">
-                    <i class="fa-solid fa-inbox fa-2x"></i>
-                    <p style="margin-top:8px;">No ${currentTab === "watchlist" ? "watchlist items saved" : "stocks matching current criteria"}.</p>
-                </td>
-            </tr>`;
+        screenedTbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fa-solid fa-folder-open"></i> No stocks matching current criteria.</td></tr>`;
         return;
     }
 
-    screenedTbody.innerHTML = stocks.map(item => {
-        const isStarred = watchlist.includes(item.ticker);
-        const floatDisplay = item.float_m !== null ? `${item.float_m}M` : `<span class="float-unknown">Unknown</span>`;
-        const newsCount = item.news ? item.news.length : 0;
+    screenedTbody.innerHTML = stocks.map(stock => {
+        const isWatchlisted = watchlist.includes(stock.ticker);
+        const starClass = isWatchlisted ? "fa-solid fa-star active-star" : "fa-regular fa-star";
+        
+        const floatDisplay = stock.float_m !== null ? `${stock.float_m}M` : '<span class="unknown-badge">N/A</span>';
+        
+        let sessionBadge = "";
+        if (stock.session_gained === "Pre-Market") {
+            sessionBadge = '<span class="session-badge pre">Pre-Market</span>';
+        } else if (stock.session_gained === "Pre & Open Market") {
+            sessionBadge = '<span class="session-badge combined">Pre & Open</span>';
+        } else {
+            sessionBadge = '<span class="session-badge open">Open Market</span>';
+        }
 
-        const isPos = item.active_gain >= 0;
-        const gainSign = isPos ? '+' : '';
-        const badgeClass = isPos ? 'positive' : 'negative';
-        const caretIcon = isPos ? 'fa-caret-up' : 'fa-caret-down';
+        const isPositiveGain = stock.active_gain >= 0;
+        const gainBadgeClass = isPositiveGain ? "gain-badge positive" : "gain-badge negative";
+        const gainSign = isPositiveGain ? "+" : "";
+        const gainCaret = isPositiveGain ? "fa-caret-up" : "fa-caret-down";
+        
+        let preBreakdownHtml = "";
+        if (stock.pre_gain !== undefined && stock.pre_gain !== null && stock.session_gained !== "Pre-Market") {
+            const isPrePos = stock.pre_gain >= 0;
+            const preColorClass = isPrePos ? "pos-text" : "neg-text";
+            const preSign = isPrePos ? "+" : "";
+            preBreakdownHtml = `<div class="sub-line ${preColorClass}">Pre: ${preSign}${stock.pre_gain.toFixed(2)}%</div>`;
+        }
 
-        const preGainText = (item.pre_gain !== null && item.pre_gain !== undefined) ? 
-            `<span class="gain-session-label">Pre: <strong class="${item.pre_gain >= 0 ? 'pos-text' : 'neg-text'}">${item.pre_gain >= 0 ? '+' : ''}${item.pre_gain.toFixed(2)}%</strong></span>` : '';
+        const newsCount = stock.news ? stock.news.length : 0;
+        const newsBtn = newsCount > 0 
+            ? `<button class="catalyst-btn" onclick="openNewsModal('${stock.ticker}')"><i class="fa-solid fa-newspaper"></i> News (${newsCount})</button>`
+            : `<a href="${stock.yahoo_url}" target="_blank" class="catalyst-link"><i class="fa-solid fa-arrow-up-right-from-square"></i> Yahoo</a>`;
 
         return `
             <tr>
-                <td class="col-star">
-                    <button class="star-btn ${isStarred ? 'starred' : ''}" onclick="toggleWatchlist('${item.ticker}')">
-                        <i class="${isStarred ? 'fa-solid' : 'fa-regular'} fa-star"></i>
-                    </button>
+                <td style="text-align: center;">
+                    <i class="${starClass}" style="cursor: pointer;" onclick="toggleWatchlist('${stock.ticker}')"></i>
                 </td>
                 <td>
-                    <div class="ticker-cell">
-                        <a href="https://www.tradingview.com/chart/?symbol=${item.ticker}" target="_blank" rel="noopener noreferrer" class="ticker-link" title="Open full chart for ${item.ticker} on TradingView">
-                            <span class="ticker-symbol">${item.ticker} <i class="fa-solid fa-arrow-up-right-from-square ticker-icon"></i></span>
+                    <div class="ticker-symbol-cell">
+                        <a href="https://www.tradingview.com/chart/?symbol=${stock.ticker}" target="_blank" class="tradingview-link" title="Open ${stock.ticker} Interactive Chart in TradingView">
+                            <span class="ticker-text">${stock.ticker}</span>
+                            <i class="fa-solid fa-chart-line tv-icon"></i>
                         </a>
-                        <span class="company-name" title="${item.company_name}">${item.company_name}</span>
+                        <span class="company-subname">${stock.company_name}</span>
                     </div>
                 </td>
+                <td>${stock.country}</td>
+                <td><span class="sector-pill">${stock.sector}</span></td>
+                <td><span class="price-val">$${stock.price.toFixed(2)}</span></td>
                 <td>
-                    <span class="country-pill"><i class="fa-solid fa-location-dot"></i> ${item.country}</span>
-                </td>
-                <td>
-                    <span class="sector-text">${item.sector}</span>
-                </td>
-                <td class="num-col">
-                    <span class="price-text">$${item.price.toFixed(2)}</span>
-                </td>
-                <td class="num-col">
-                    <div class="gain-badge-box">
-                        <span class="gain-badge ${badgeClass}">
-                            <i class="fa-solid ${caretIcon}"></i> ${gainSign}${item.active_gain.toFixed(2)}%
-                        </span>
-                        <span class="gain-session-label">${item.session_gained}</span>
-                        ${preGainText}
+                    <div class="${gainBadgeClass}">
+                        <i class="fa-solid ${gainCaret}"></i> ${gainSign}${stock.active_gain.toFixed(2)}%
                     </div>
+                    ${preBreakdownHtml}
+                    ${sessionBadge}
                 </td>
-                <td class="num-col">
-                    <span class="relvol-pill">${item.projected_rel_vol.toFixed(2)}x</span>
-                    <span class="raw-relvol">Raw: ${item.raw_rel_vol.toFixed(2)}x</span>
+                <td>
+                    <span class="rel-vol-badge">${stock.projected_rel_vol.toFixed(1)}x</span>
+                    <div class="sub-line">Raw: ${stock.raw_rel_vol.toFixed(1)}x</div>
                 </td>
-                <td class="num-col">
-                    <span style="font-weight:600;">${item.volume.toLocaleString()}</span>
-                </td>
-                <td class="num-col">
-                    <span class="float-text">${floatDisplay}</span>
-                </td>
-                <td class="col-catalyst">
-                    <button class="btn-catalyst" onclick="openNewsModal('${item.ticker}')">
-                        <i class="fa-solid fa-newspaper"></i> Catalysts (${newsCount})
-                    </button>
-                </td>
+                <td>${formatNumber(stock.volume)}</td>
+                <td>${floatDisplay}</td>
+                <td>${newsBtn}</td>
             </tr>
         `;
     }).join("");
 }
 
 function openNewsModal(tickerSymbol) {
-    const item = rawData.find(s => s.ticker === tickerSymbol);
-    if (!item) return;
+    const stock = rawData.find(s => s.ticker === tickerSymbol);
+    if (!stock || !stock.news) return;
 
-    modalTickerSymbol.textContent = item.ticker;
-    modalCompanyName.textContent = item.company_name;
-    modalYahooLink.href = item.yahoo_url;
+    modalTickerSymbol.textContent = stock.ticker;
+    modalCompanyName.textContent = stock.company_name;
+    modalYahooLink.href = stock.yahoo_url;
 
-    if (!item.news || item.news.length === 0) {
-        modalNewsContent.innerHTML = `<p class="empty-state">No recent news articles reported on Yahoo Finance.</p>`;
+    if (stock.news.length === 0) {
+        modalNewsContent.innerHTML = `<div class="empty-state">No recent articles found.</div>`;
     } else {
-        modalNewsContent.innerHTML = item.news.map(n => `
-            <div class="news-item">
-                <a href="${n.url}" target="_blank" class="news-title">${n.title}</a>
-                <div class="news-meta">
-                    <span><i class="fa-solid fa-building-newspaper"></i> ${n.publisher}</span>
-                    <span>${n.pub_date ? new Date(n.pub_date).toLocaleString() : ''}</span>
+        modalNewsContent.innerHTML = stock.news.map(n => `
+            <div class="news-card">
+                <a href="${n.url}" target="_blank" class="news-card-title">${n.title}</a>
+                <div class="news-card-meta">
+                    <span><i class="fa-regular fa-building"></i> ${n.publisher}</span>
+                    <span><i class="fa-regular fa-clock"></i> ${n.pub_date ? new Date(n.pub_date).toLocaleString() : 'Recent'}</span>
                 </div>
             </div>
         `).join("");
@@ -405,32 +435,42 @@ function openNewsModal(tickerSymbol) {
     newsModal.classList.remove("hidden");
 }
 
+function formatNumber(num) {
+    if (!num) return "0";
+    if (num >= 1_000_000) return (num / 1_000_000).toFixed(2) + "M";
+    if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
+    return num.toLocaleString();
+}
+
 function exportToCSV() {
     let dataset = currentTab === "screened" ? rawData : rawData.filter(s => watchlist.includes(s.ticker));
-    if (dataset.length === 0) return alert("No data to export!");
+    if (dataset.length === 0) {
+        alert("No stocks available to export.");
+        return;
+    }
 
-    const headers = ["Ticker", "Company", "Country", "Sector", "Price", "Session", "Active Gain %", "Projected Rel Vol", "Raw Rel Vol", "Volume", "Float (M)", "Yahoo Link"];
+    const headers = ["Ticker", "Company Name", "Country", "Sector", "Price ($)", "Active Gain (%)", "Pre Gain (%)", "Reg Gain (%)", "Rel Vol (Projected)", "Rel Vol (Raw)", "Volume", "Float (M)"];
     
     const rows = dataset.map(s => [
-        s.ticker,
-        `"${s.company_name.replace(/"/g, '""')}"`,
-        s.country,
-        s.sector,
+        `"${s.ticker}"`,
+        `"${(s.company_name || "").replace(/"/g, '""')}"`,
+        `"${s.country}"`,
+        `"${s.sector}"`,
         s.price,
-        s.session_gained,
         s.active_gain,
+        s.pre_gain,
+        s.reg_gain,
         s.projected_rel_vol,
         s.raw_rel_vol,
         s.volume,
-        s.float_m !== null ? s.float_m : "Unknown",
-        s.yahoo_url
+        s.float_m !== null ? s.float_m : "N/A"
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `momentum_pulse_${currentTab}_${new Date().toISOString().slice(0,10)}.csv`);
+    link.setAttribute("download", `MomentumPulse_Stocks_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
