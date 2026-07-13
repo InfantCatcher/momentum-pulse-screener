@@ -1,8 +1,7 @@
 import os
 import re
 import time
-from datetime import datetime, time as dtime
-from zoneinfo import ZoneInfo
+from datetime import datetime, time as dtime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 
@@ -33,8 +32,14 @@ FALLBACK_POPULAR_STOCKS = [
 ]
 
 def get_market_session_info() -> Dict[str, Any]:
-    ny_tz = ZoneInfo("America/New_York")
-    now = datetime.now(ny_tz)
+    try:
+        from zoneinfo import ZoneInfo
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
+    except Exception:
+        edt_tz = timezone(timedelta(hours=-4))
+        now = datetime.now(edt_tz)
+
     weekday = now.weekday()
     current_time = now.time()
     

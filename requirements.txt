@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 yfinance
-beautifulsoup4
 requests
-pytz
+beautifulsoup4
+lxml
+tzdata
