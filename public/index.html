@@ -4,14 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MomentumPulse - Stock Screener</title>
+    <!-- Google Fonts: Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for crisp modern icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
     <div class="app-container">
+        <!-- Top Navigation / Header -->
         <header class="top-header">
             <div class="logo-area">
                 <div class="logo-icon"><i class="fa-solid fa-bolt-lightning"></i></div>
@@ -21,6 +24,7 @@
                 </div>
             </div>
 
+            <!-- Market Status Badge -->
             <div class="market-status-card" id="market-status-card">
                 <span class="status-indicator-dot" id="status-dot"></span>
                 <div class="status-info">
@@ -29,6 +33,7 @@
                 </div>
             </div>
 
+            <!-- Auto-Refresh & Action Controls -->
             <div class="refresh-controls">
                 <div class="countdown-container" title="Auto-refreshing every 60 seconds">
                     <div class="progress-ring-box">
@@ -49,7 +54,9 @@
             </div>
         </header>
 
+        <!-- Main Dashboard Container -->
         <main class="dashboard-main">
+            <!-- Filter Bar & View Tabs -->
             <div class="control-panel glass-card">
                 <div class="panel-header">
                     <div class="view-tabs">
@@ -73,6 +80,7 @@
                     </button>
                 </div>
 
+                <!-- Expandable Filter Options -->
                 <div class="filter-drawer hidden" id="filter-drawer">
                     <div class="filter-grid">
                         <div class="filter-group">
@@ -129,6 +137,7 @@
                 </div>
             </div>
 
+            <!-- Stats Bar -->
             <div class="summary-bar">
                 <div class="summary-chip">
                     <span class="chip-label">Scanned Active Tickers:</span>
@@ -149,6 +158,7 @@
                 </div>
             </div>
 
+            <!-- Main Data Table Glass Container -->
             <div class="table-container glass-card">
                 <table class="data-table" id="screener-table">
                     <thead>
@@ -180,6 +190,7 @@
         </main>
     </div>
 
+    <!-- Catalyst News Drawer / Modal -->
     <div class="modal-backdrop hidden" id="news-modal">
         <div class="modal-card glass-card">
             <div class="modal-header">
@@ -190,6 +201,7 @@
                 <button class="btn-close" id="close-modal-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="modal-body" id="modal-news-content">
+                <!-- Dynamic news list rendered here -->
             </div>
             <div class="modal-footer">
                 <a href="#" target="_blank" class="btn btn-yahoo" id="modal-yahoo-link">
