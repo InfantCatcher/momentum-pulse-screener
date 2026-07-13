@@ -25,6 +25,16 @@ app.add_middleware(
 SEC_TICKERS_CACHE: List[str] = []
 LAST_SEC_FETCH_TIME: float = 0.0
 
+FALLBACK_POPULAR_STOCKS = [
+    "PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "NIO", "XPEV", "LCID", "BB",
+    "CLSK", "WULF", "HUT", "BITF", "IREN", "CIFR", "SDIG", "MSTR", "COIN", "GME",
+    "AMC", "MULN", "FFIE", "CVNA", "UPST", "AI", "PLTR", "SOFI", "RIVN", "HOOD",
+    "DKNG", "OPEN", "PATH", "STEM", "JOBY", "ACHR", "QS", "LCID", "FSR", "NKLA",
+    "RIG", "VALE", "ITUB", "BBD", "ABEV", "CLVT", "PBR", "KOS", "SWN", "NE",
+    "SAVA", "VTVT", "OCGN", "TNXP", "ATOS", "VXRT", "NVAX", "INO", "BNGO", "SNDL",
+    "TLRY", "CGC", "ACB", "CRON", "GRWG", "IQ", "HUYA", "DOYU", "TIGR", "FUTU"
+]
+
 def get_market_session_info() -> Dict[str, Any]:
     ny_tz = ZoneInfo("America/New_York")
     now = datetime.now(ny_tz)
@@ -78,7 +88,7 @@ def get_master_ticker_universe() -> List[str]:
                 "User-Agent": "MomentumPulse Screener/1.0 (contact@momentumpulse.com)"
             }
             url = "https://www.sec.gov/files/company_tickers.json"
-            res = requests.get(url, headers=sec_headers, timeout=3)
+            res = requests.get(url, headers=sec_headers, timeout=2.5)
             if res.status_code == 200:
                 data = res.json()
                 symbols = set()
@@ -89,8 +99,8 @@ def get_master_ticker_universe() -> List[str]:
                 if symbols:
                     SEC_TICKERS_CACHE = sorted(list(symbols))
                     LAST_SEC_FETCH_TIME = now
-        except Exception as e:
-            print(f"SEC EDGAR fetch error: {e}")
+        except Exception:
+            pass
             
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -114,7 +124,7 @@ def get_master_ticker_universe() -> List[str]:
     def fetch_url(u):
         symbols = []
         try:
-            r = requests.get(u, headers=headers, timeout=2)
+            r = requests.get(u, headers=headers, timeout=2.0)
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, "html.parser")
                 for link in soup.find_all("a"):
@@ -128,17 +138,25 @@ def get_master_ticker_universe() -> List[str]:
             pass
         return symbols
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futs = [executor.submit(fetch_url, url) for url in target_urls]
-        for f in as_completed(futs):
-            for sym in f.result():
-                if sym not in seen:
-                    seen.add(sym)
-                    active_scraped.append(sym)
+    try:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futs = [executor.submit(fetch_url, url) for url in target_urls]
+            for f in as_completed(futs):
+                for sym in f.result():
+                    if sym not in seen:
+                        seen.add(sym)
+                        active_scraped.append(sym)
+    except Exception:
+        pass
             
     combined = list(active_scraped)
     if SEC_TICKERS_CACHE:
         for sym in SEC_TICKERS_CACHE:
+            if sym not in seen:
+                seen.add(sym)
+                combined.append(sym)
+    else:
+        for sym in FALLBACK_POPULAR_STOCKS:
             if sym not in seen:
                 seen.add(sym)
                 combined.append(sym)
@@ -270,20 +288,27 @@ def screen_stocks(
     elapsed_fraction = session_info["elapsed_fraction"]
     is_premarket = session_info["is_premarket"]
     
-    tickers_universe = get_master_ticker_universe()
+    try:
+        tickers_universe = get_master_ticker_universe()
+    except Exception:
+        tickers_universe = FALLBACK_POPULAR_STOCKS
+
     if not tickers_universe:
-        tickers_universe = ["PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "SOUND", "NIO", "XPEV", "LCID"]
+        tickers_universe = FALLBACK_POPULAR_STOCKS
         
-    scan_limit = min(150, len(tickers_universe))
+    scan_limit = min(100, len(tickers_universe))
     tickers_to_scan = tickers_universe[:scan_limit]
 
     results = []
-    with ThreadPoolExecutor(max_workers=30) as executor:
-        futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
-        for future in as_completed(futures):
-            res = future.result()
-            if res:
-                results.append(res)
+    try:
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
+            for future in as_completed(futures):
+                res = future.result()
+                if res:
+                    results.append(res)
+    except Exception as e:
+        print("Batch fetch exception:", e)
                 
     filtered = []
     for item in results:
