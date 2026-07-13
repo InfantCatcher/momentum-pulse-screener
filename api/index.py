@@ -95,39 +95,54 @@ def scrape_active_tickers() -> List[str]:
             
     return sorted(list(tickers))
 
-def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float) -> Optional[Dict[str, Any]]:
+def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float, is_premarket: bool) -> Optional[Dict[str, Any]]:
     try:
         t = yf.Ticker(ticker_symbol)
         info = t.info
         if not info:
             return None
             
-        current_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("preMarketPrice")
-        if not current_price:
-            return None
-            
         prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
         if not prev_close:
             return None
             
+        reg_price = info.get("regularMarketPrice") or info.get("currentPrice")
         premarket_price = info.get("preMarketPrice")
         
-        reg_gain = ((current_price - prev_close) / prev_close) * 100 if current_price and prev_close else 0.0
-        pre_gain = ((premarket_price - prev_close) / prev_close) * 100 if premarket_price and prev_close else 0.0
-        
-        session_gained = "Open Market"
-        active_gain = reg_gain
-        if pre_gain >= 5.0 and (reg_gain < 5.0 or premarket_price == current_price):
-            session_gained = "Pre-Market"
+        if info.get("regularMarketChangePercent") is not None:
+            reg_gain = float(info.get("regularMarketChangePercent"))
+        else:
+            reg_gain = ((reg_price - prev_close) / prev_close) * 100 if reg_price and prev_close else 0.0
+
+        if info.get("preMarketChangePercent") is not None:
+            pre_gain = float(info.get("preMarketChangePercent"))
+        else:
+            pre_gain = ((premarket_price - prev_close) / prev_close) * 100 if premarket_price and prev_close else 0.0
+
+        if is_premarket and premarket_price:
+            display_price = premarket_price
             active_gain = pre_gain
+            session_gained = "Pre-Market"
+        elif pre_gain >= 5.0 and (reg_gain < 5.0 or premarket_price == reg_price) and premarket_price:
+            display_price = premarket_price
+            active_gain = pre_gain
+            session_gained = "Pre-Market"
         elif pre_gain >= 5.0 and reg_gain >= 5.0:
+            display_price = reg_price if reg_price else premarket_price
+            active_gain = reg_gain
             session_gained = "Pre & Open Market"
-            
+        else:
+            display_price = reg_price if reg_price else (premarket_price or prev_close)
+            active_gain = reg_gain
+            session_gained = "Open Market"
+
+        if not display_price:
+            display_price = reg_price or premarket_price or prev_close
+
         volume = info.get("regularMarketVolume") or info.get("volume") or 0
         avg_vol_30d = info.get("averageVolume") or info.get("averageVolume10days") or info.get("averageDailyVolume3Month") or 1
         
         raw_rel_vol = (volume / avg_vol_30d) if avg_vol_30d > 0 else 0.0
-        
         projected_vol = volume / elapsed_fraction if elapsed_fraction > 0 else volume
         projected_rel_vol = (projected_vol / avg_vol_30d) if avg_vol_30d > 0 else 0.0
         
@@ -164,7 +179,8 @@ def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float) -> Opt
         return {
             "ticker": ticker_symbol,
             "company_name": company_name,
-            "price": round(current_price, 2),
+            "price": round(display_price, 2),
+            "reg_price": round(reg_price, 2) if reg_price else None,
             "prev_close": round(prev_close, 2),
             "premarket_price": round(premarket_price, 2) if premarket_price else None,
             "reg_gain": round(reg_gain, 2),
@@ -202,6 +218,7 @@ def screen_stocks(
     start_time = time.time()
     session_info = get_market_session_info()
     elapsed_fraction = session_info["elapsed_fraction"]
+    is_premarket = session_info["is_premarket"]
     
     tickers = scrape_active_tickers()
     if not tickers:
@@ -209,7 +226,7 @@ def screen_stocks(
         
     results = []
     with ThreadPoolExecutor(max_workers=15) as executor:
-        futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction): sym for sym in tickers}
+        futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers}
         for future in as_completed(futures):
             res = future.result()
             if res:
