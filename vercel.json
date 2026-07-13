@@ -1,20 +1,8 @@
 {
-  "name": "momentum-pulse-screener",
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "backend.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/static/(.*)",
-      "dest": "/static/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "backend.py"
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
     }
   ]
 }

@@ -193,7 +193,7 @@ async function fetchData() {
         
     } catch (err) {
         console.error("Failed to fetch screener data:", err);
-        screenedTbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i> Error loading screener data. Backend server running?</td></tr>`;
+        screenedTbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i> Error loading screener data. Server ready?</td></tr>`;
     } finally {
         scanBtnIcon.classList.remove("fa-spin");
     }
