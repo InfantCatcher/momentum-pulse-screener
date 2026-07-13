@@ -22,6 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+SEC_TICKERS_CACHE: List[str] = []
+LAST_SEC_FETCH_TIME: float = 0.0
+
 def get_market_session_info() -> Dict[str, Any]:
     ny_tz = ZoneInfo("America/New_York")
     now = datetime.now(ny_tz)
@@ -65,7 +68,30 @@ def get_market_session_info() -> Dict[str, Any]:
         "is_open": session_name == "Regular Session"
     }
 
-def scrape_active_tickers() -> List[str]:
+def get_master_ticker_universe() -> List[str]:
+    global SEC_TICKERS_CACHE, LAST_SEC_FETCH_TIME
+    now = time.time()
+    
+    if not SEC_TICKERS_CACHE or (now - LAST_SEC_FETCH_TIME > 3600):
+        try:
+            sec_headers = {
+                "User-Agent": "MomentumPulse Screener/1.0 (contact@momentumpulse.com)"
+            }
+            url = "https://www.sec.gov/files/company_tickers.json"
+            res = requests.get(url, headers=sec_headers, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                symbols = set()
+                for val in data.values():
+                    sym = val.get("ticker")
+                    if sym and sym.isalpha() and len(sym) <= 5:
+                        symbols.add(sym.upper())
+                if symbols:
+                    SEC_TICKERS_CACHE = sorted(list(symbols))
+                    LAST_SEC_FETCH_TIME = now
+        except Exception as e:
+            print(f"SEC EDGAR fetch error: {e}")
+            
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
@@ -81,25 +107,33 @@ def scrape_active_tickers() -> List[str]:
         "https://finance.yahoo.com/markets/stocks/premarket-most-active/?count=100&offset=0",
         "https://finance.yahoo.com/markets/stocks/trending/?count=100&offset=0"
     ]
-    tickers = set()
     
+    active_scraped = []
+    seen = set()
     for url in target_urls:
         try:
-            res = requests.get(url, headers=headers, timeout=8)
+            res = requests.get(url, headers=headers, timeout=3)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                links = soup.find_all("a")
-                for link in links:
+                for link in soup.find_all("a"):
                     href = link.get("href", "")
                     match = re.search(r"^/quote/([A-Z0-9\-]+)/?$", href)
                     if match:
-                        sym = match.group(1)
-                        if not sym.startswith("^") and "=" not in sym and "%" not in sym:
-                            tickers.add(sym)
-        except Exception as e:
-            print(f"Error scraping {url}: {e}")
+                        sym = match.group(1).upper()
+                        if not sym.startswith("^") and "=" not in sym and "%" not in sym and sym not in seen:
+                            seen.add(sym)
+                            active_scraped.append(sym)
+        except Exception:
+            pass
             
-    return sorted(list(tickers))
+    combined = list(active_scraped)
+    if SEC_TICKERS_CACHE:
+        for sym in SEC_TICKERS_CACHE:
+            if sym not in seen:
+                seen.add(sym)
+                combined.append(sym)
+                
+    return combined
 
 def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float, is_premarket: bool) -> Optional[Dict[str, Any]]:
     try:
@@ -226,13 +260,16 @@ def screen_stocks(
     elapsed_fraction = session_info["elapsed_fraction"]
     is_premarket = session_info["is_premarket"]
     
-    tickers = scrape_active_tickers()
-    if not tickers:
-        tickers = ["PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "SOUND", "NIO", "XPEV", "LCID"]
+    tickers_universe = get_master_ticker_universe()
+    if not tickers_universe:
+        tickers_universe = ["PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "SOUND", "NIO", "XPEV", "LCID"]
         
+    scan_limit = min(500, len(tickers_universe))
+    tickers_to_scan = tickers_universe[:scan_limit]
+
     results = []
-    with ThreadPoolExecutor(max_workers=15) as executor:
-        futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers}
+    with ThreadPoolExecutor(max_workers=25) as executor:
+        futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
         for future in as_completed(futures):
             res = future.result()
             if res:
@@ -263,7 +300,8 @@ def screen_stocks(
     
     return {
         "market_session": session_info,
-        "total_scanned": len(tickers),
+        "total_universe_available": len(tickers_universe),
+        "total_scanned": len(tickers_to_scan),
         "total_passed": len(filtered),
         "execution_time_seconds": execution_time,
         "stocks": filtered
