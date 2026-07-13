@@ -264,11 +264,11 @@ def screen_stocks(
     if not tickers_universe:
         tickers_universe = ["PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "SOUND", "NIO", "XPEV", "LCID"]
         
-    scan_limit = min(500, len(tickers_universe))
+    scan_limit = min(200, len(tickers_universe))
     tickers_to_scan = tickers_universe[:scan_limit]
 
     results = []
-    with ThreadPoolExecutor(max_workers=25) as executor:
+    with ThreadPoolExecutor(max_workers=30) as executor:
         futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
         for future in as_completed(futures):
             res = future.result()
