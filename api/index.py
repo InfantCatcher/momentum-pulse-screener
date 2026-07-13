@@ -123,11 +123,11 @@ def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float, is_pre
             display_price = premarket_price
             active_gain = pre_gain
             session_gained = "Pre-Market"
-        elif pre_gain >= 5.0 and (reg_gain < 5.0 or premarket_price == reg_price) and premarket_price:
+        elif abs(pre_gain) >= 5.0 and (abs(reg_gain) < 5.0 or premarket_price == reg_price) and premarket_price:
             display_price = premarket_price
             active_gain = pre_gain
             session_gained = "Pre-Market"
-        elif pre_gain >= 5.0 and reg_gain >= 5.0:
+        elif abs(pre_gain) >= 5.0 and abs(reg_gain) >= 5.0:
             display_price = reg_price if reg_price else premarket_price
             active_gain = reg_gain
             session_gained = "Pre & Open Market"
@@ -210,7 +210,7 @@ def screen_stocks(
     min_price: float = Query(1.0, description="Minimum price"),
     max_price: float = Query(25.0, description="Maximum price"),
     min_rel_vol: float = Query(4.0, description="Minimum time-adjusted relative volume"),
-    min_gain: float = Query(5.0, description="Minimum percentage gain"),
+    min_gain: float = Query(5.0, description="Minimum percentage gain (+/- magnitude)"),
     min_float: float = Query(5.0, description="Minimum float in millions"),
     max_float: float = Query(25.0, description="Maximum float in millions"),
     allow_unknown_float: bool = Query(True, description="Allow stocks with unknown float")
@@ -237,7 +237,7 @@ def screen_stocks(
         if not (min_price <= item["price"] <= max_price):
             continue
             
-        if item["reg_gain"] < min_gain and item["pre_gain"] < min_gain:
+        if abs(item["reg_gain"]) < min_gain and abs(item["pre_gain"]) < min_gain:
             continue
             
         if item["projected_rel_vol"] < min_rel_vol and item["raw_rel_vol"] < min_rel_vol:
