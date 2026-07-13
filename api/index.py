@@ -80,10 +80,14 @@ def get_market_session_info() -> Dict[str, Any]:
         "is_open": session_name == "Regular Session"
     }
 
+SCRAPED_TICKERS_CACHE: List[str] = []
+LAST_SCRAPED_FETCH_TIME: float = 0.0
+
 def get_master_ticker_universe() -> List[str]:
-    global SEC_TICKERS_CACHE, LAST_SEC_FETCH_TIME
+    global SEC_TICKERS_CACHE, LAST_SEC_FETCH_TIME, SCRAPED_TICKERS_CACHE, LAST_SCRAPED_FETCH_TIME
     now = time.time()
     
+    # 1. Fetch and cache SEC EDGAR ticker list (1 hour)
     if not SEC_TICKERS_CACHE or (now - LAST_SEC_FETCH_TIME > 3600):
         try:
             sec_headers = {
@@ -104,6 +108,10 @@ def get_master_ticker_universe() -> List[str]:
         except Exception:
             pass
             
+    # 2. Return cached scraped universe if it is fresh (under 60s)
+    if SCRAPED_TICKERS_CACHE and (now - LAST_SCRAPED_FETCH_TIME < 60.0):
+        return SCRAPED_TICKERS_CACHE
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
@@ -161,6 +169,8 @@ def get_master_ticker_universe() -> List[str]:
                 seen.add(sym)
                 combined.append(sym)
                 
+    SCRAPED_TICKERS_CACHE = combined
+    LAST_SCRAPED_FETCH_TIME = now
     return combined
 
 def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float, is_premarket: bool) -> Optional[Dict[str, Any]]:
@@ -290,7 +300,8 @@ def screen_stocks(
     min_float: float = Query(5.0, description="Minimum float in millions"),
     max_float: float = Query(25.0, description="Maximum float in millions"),
     allow_unknown_float: bool = Query(True, description="Allow stocks with unknown float"),
-    limit: int = Query(500, description="Number of tickers to scan per cycle")
+    offset: int = Query(0, description="Starting offset index in universe"),
+    limit: int = Query(60, description="Number of tickers to scan per chunk")
 ):
     start_time = time.time()
     session_info = get_market_session_info()
@@ -305,12 +316,13 @@ def screen_stocks(
     if not tickers_universe:
         tickers_universe = FALLBACK_POPULAR_STOCKS
         
-    scan_limit = min(max(50, limit), len(tickers_universe))
-    tickers_to_scan = tickers_universe[:scan_limit]
+    start_idx = max(0, offset)
+    end_idx = min(start_idx + limit, len(tickers_universe))
+    tickers_to_scan = tickers_universe[start_idx:end_idx]
 
     results = []
     try:
-        with ThreadPoolExecutor(max_workers=35) as executor:
+        with ThreadPoolExecutor(max_workers=40) as executor:
             futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
             for future in as_completed(futures):
                 try:
@@ -351,7 +363,9 @@ def screen_stocks(
     return {
         "market_session": session_info,
         "total_universe_available": len(tickers_universe),
-        "total_scanned": len(tickers_to_scan),
+        "offset": start_idx,
+        "chunk_size": len(tickers_to_scan),
+        "total_scanned_cumulative": min(end_idx, len(tickers_universe)),
         "total_passed": len(filtered),
         "execution_time_seconds": execution_time,
         "stocks": filtered
