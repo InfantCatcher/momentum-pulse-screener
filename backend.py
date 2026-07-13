@@ -80,7 +80,7 @@ def get_master_ticker_universe() -> List[str]:
                 "User-Agent": "MomentumPulse Screener/1.0 (contact@momentumpulse.com)"
             }
             url = "https://www.sec.gov/files/company_tickers.json"
-            res = requests.get(url, headers=sec_headers, timeout=5)
+            res = requests.get(url, headers=sec_headers, timeout=3)
             if res.status_code == 200:
                 data = res.json()
                 symbols = set()
@@ -112,21 +112,31 @@ def get_master_ticker_universe() -> List[str]:
     
     active_scraped = []
     seen = set()
-    for url in target_urls:
+    
+    def fetch_url(u):
+        symbols = []
         try:
-            res = requests.get(url, headers=headers, timeout=3)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
+            r = requests.get(u, headers=headers, timeout=2)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, "html.parser")
                 for link in soup.find_all("a"):
                     href = link.get("href", "")
                     match = re.search(r"^/quote/([A-Z0-9\-]+)/?$", href)
                     if match:
                         sym = match.group(1).upper()
-                        if not sym.startswith("^") and "=" not in sym and "%" not in sym and sym not in seen:
-                            seen.add(sym)
-                            active_scraped.append(sym)
+                        if not sym.startswith("^") and "=" not in sym and "%" not in sym:
+                            symbols.append(sym)
         except Exception:
             pass
+        return symbols
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futs = [executor.submit(fetch_url, url) for url in target_urls]
+        for f in as_completed(futs):
+            for sym in f.result():
+                if sym not in seen:
+                    seen.add(sym)
+                    active_scraped.append(sym)
             
     combined = list(active_scraped)
     if SEC_TICKERS_CACHE:
@@ -266,7 +276,7 @@ def screen_stocks(
     if not tickers_universe:
         tickers_universe = ["PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "SOUND", "NIO", "XPEV", "LCID"]
         
-    scan_limit = min(200, len(tickers_universe))
+    scan_limit = min(150, len(tickers_universe))
     tickers_to_scan = tickers_universe[:scan_limit]
 
     results = []
