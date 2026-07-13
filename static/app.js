@@ -369,10 +369,7 @@ function renderTable(stocks) {
             preBreakdownHtml = `<div class="sub-line ${preColorClass}">Pre: ${preSign}${stock.pre_gain.toFixed(2)}%</div>`;
         }
 
-        const newsCount = stock.news ? stock.news.length : 0;
-        const newsBtn = newsCount > 0 
-            ? `<button class="catalyst-btn" onclick="openNewsModal('${stock.ticker}')"><i class="fa-solid fa-newspaper"></i> News (${newsCount})</button>`
-            : `<a href="${stock.yahoo_url}" target="_blank" class="catalyst-link"><i class="fa-solid fa-arrow-up-right-from-square"></i> Yahoo</a>`;
+        const newsBtn = `<button class="catalyst-btn" onclick="openNewsModal('${stock.ticker}')"><i class="fa-solid fa-newspaper"></i> News</button>`;
 
         return `
             <tr>
@@ -410,29 +407,46 @@ function renderTable(stocks) {
     }).join("");
 }
 
-function openNewsModal(tickerSymbol) {
-    const stock = rawData.find(s => s.ticker === tickerSymbol);
-    if (!stock || !stock.news) return;
-
-    modalTickerSymbol.textContent = stock.ticker;
-    modalCompanyName.textContent = stock.company_name;
-    modalYahooLink.href = stock.yahoo_url;
-
-    if (stock.news.length === 0) {
-        modalNewsContent.innerHTML = `<div class="empty-state">No recent articles found.</div>`;
-    } else {
-        modalNewsContent.innerHTML = stock.news.map(n => `
-            <div class="news-card">
-                <a href="${n.url}" target="_blank" class="news-card-title">${n.title}</a>
-                <div class="news-card-meta">
-                    <span><i class="fa-regular fa-building"></i> ${n.publisher}</span>
-                    <span><i class="fa-regular fa-clock"></i> ${n.pub_date ? new Date(n.pub_date).toLocaleString() : 'Recent'}</span>
-                </div>
-            </div>
-        `).join("");
-    }
-
+async function openNewsModal(tickerSymbol) {
+    modalTickerSymbol.textContent = tickerSymbol;
+    modalCompanyName.textContent = "Loading catalyst news...";
+    modalYahooLink.href = `https://finance.yahoo.com/quote/${tickerSymbol}/news`;
+    modalNewsContent.innerHTML = `
+        <div class="spinner-box" style="padding: 20px;">
+            <div class="pulse-spinner"></div>
+            <p style="margin-top: 10px; color: var(--text-secondary); font-size: 13px;">Fetching latest news articles...</p>
+        </div>
+    `;
     newsModal.classList.remove("hidden");
+
+    try {
+        const res = await fetch(`/api/news?ticker=${tickerSymbol}`);
+        const data = await res.json();
+        
+        const stock = rawData.find(s => s.ticker === tickerSymbol);
+        if (stock) {
+            modalCompanyName.textContent = stock.company_name || tickerSymbol;
+        } else {
+            modalCompanyName.textContent = tickerSymbol;
+        }
+
+        if (!data.news || data.news.length === 0) {
+            modalNewsContent.innerHTML = `<div class="empty-state">No recent articles found.</div>`;
+        } else {
+            modalNewsContent.innerHTML = data.news.map(n => `
+                <div class="news-card">
+                    <a href="${n.url}" target="_blank" class="news-card-title">${n.title}</a>
+                    <div class="news-card-meta">
+                        <span><i class="fa-regular fa-building"></i> ${n.publisher}</span>
+                        <span><i class="fa-regular fa-clock"></i> ${n.pub_date ? new Date(n.pub_date).toLocaleString() : 'Recent'}</span>
+                    </div>
+                </div>
+            `).join("");
+        }
+    } catch (err) {
+        console.error("Failed to fetch news:", err);
+        modalNewsContent.innerHTML = `<div class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i> Error loading news articles.</div>`;
+    }
 }
 
 function formatNumber(num) {
