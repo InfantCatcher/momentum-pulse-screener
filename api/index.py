@@ -70,10 +70,16 @@ def scrape_active_tickers() -> List[str]:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
     target_urls = [
-        "https://finance.yahoo.com/markets/stocks/gainers/",
-        "https://finance.yahoo.com/markets/stocks/most-active/",
-        "https://finance.yahoo.com/markets/stocks/premarket-gainers/",
-        "https://finance.yahoo.com/markets/stocks/premarket-most-active/"
+        "https://finance.yahoo.com/markets/stocks/gainers/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/gainers/?count=100&offset=100",
+        "https://finance.yahoo.com/markets/stocks/losers/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/losers/?count=100&offset=100",
+        "https://finance.yahoo.com/markets/stocks/most-active/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/most-active/?count=100&offset=100",
+        "https://finance.yahoo.com/markets/stocks/premarket-gainers/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/premarket-losers/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/premarket-most-active/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/trending/?count=100&offset=0"
     ]
     tickers = set()
     
