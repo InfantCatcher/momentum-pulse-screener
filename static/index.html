@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MomentumPulse - Stock Screener</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="top-header">
+            <div class="logo-area">
+                <div class="logo-icon"><i class="fa-solid fa-bolt-lightning"></i></div>
+                <div class="logo-text">
+                    <h1>MOMENTUM<span>PULSE</span></h1>
+                    <span class="tagline">Real-Time Stock Screener</span>
+                </div>
+            </div>
+
+            <div class="market-status-card" id="market-status-card">
+                <span class="status-indicator-dot" id="status-dot"></span>
+                <div class="status-info">
+                    <span class="status-label" id="session-name">Checking Market...</span>
+                    <span class="status-time" id="est-time">--:--:-- EST</span>
+                </div>
+            </div>
+
+            <div class="refresh-controls">
+                <div class="countdown-container" title="Auto-refreshing every 60 seconds">
+                    <div class="progress-ring-box">
+                        <svg class="progress-ring" width="36" height="36">
+                            <circle class="progress-ring__circle-bg" stroke="rgba(255,255,255,0.1)" stroke-width="3" fill="transparent" r="14" cx="18" cy="18"/>
+                            <circle class="progress-ring__circle" id="countdown-circle" stroke="var(--accent-cyan)" stroke-width="3" stroke-dasharray="87.96" stroke-dashoffset="0" fill="transparent" r="14" cx="18" cy="18"/>
+                        </svg>
+                        <span class="countdown-text" id="countdown-sec">60</span>
+                    </div>
+                </div>
+                <button class="btn btn-icon" id="toggle-autorefresh-btn" title="Pause / Resume Auto Refresh">
+                    <i class="fa-solid fa-pause" id="refresh-icon"></i>
+                </button>
+                <button class="btn btn-primary" id="scan-now-btn">
+                    <i class="fa-solid fa-arrows-rotate" id="scan-btn-icon"></i>
+                    <span>Scan Now</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="dashboard-main">
+            <div class="control-panel glass-card">
+                <div class="panel-header">
+                    <div class="view-tabs">
+                        <button class="tab-btn active" id="tab-screened">
+                            <i class="fa-solid fa-fire"></i> Flagged Momentum Stocks
+                            <span class="badge" id="screened-count">0</span>
+                        </button>
+                        <button class="tab-btn" id="tab-watchlist">
+                            <i class="fa-solid fa-star"></i> My Watchlist
+                            <span class="badge badge-star" id="watchlist-count">0</span>
+                        </button>
+                    </div>
+
+                    <div class="quick-search-box">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="search-input" placeholder="Search ticker, sector, or country...">
+                    </div>
+
+                    <button class="btn btn-secondary btn-sm" id="toggle-filters-btn">
+                        <i class="fa-solid fa-sliders"></i> Filter Criteria
+                    </button>
+                </div>
+
+                <div class="filter-drawer hidden" id="filter-drawer">
+                    <div class="filter-grid">
+                        <div class="filter-group">
+                            <label><i class="fa-solid fa-tag"></i> Price Range ($)</label>
+                            <div class="input-range-pair">
+                                <input type="number" id="min-price" value="1.00" step="0.5" min="0">
+                                <span>to</span>
+                                <input type="number" id="max-price" value="25.00" step="0.5" min="0">
+                            </div>
+                        </div>
+
+                        <div class="filter-group">
+                            <label><i class="fa-solid fa-chart-line"></i> Time-Adjusted Rel Vol (Min)</label>
+                            <div class="slider-val-box">
+                                <input type="range" id="min-relvol-range" min="1" max="15" step="0.5" value="4.0">
+                                <span class="range-display" id="min-relvol-val">4.0x</span>
+                            </div>
+                        </div>
+
+                        <div class="filter-group">
+                            <label><i class="fa-solid fa-arrow-trend-up"></i> Min % Gainer</label>
+                            <div class="slider-val-box">
+                                <input type="range" id="min-gain-range" min="1" max="50" step="1" value="5">
+                                <span class="range-display" id="min-gain-val">+5%</span>
+                            </div>
+                        </div>
+
+                        <div class="filter-group">
+                            <label><i class="fa-solid fa-cubes"></i> Float Shares (Millions)</label>
+                            <div class="input-range-pair">
+                                <input type="number" id="min-float" value="5.0" step="1" min="0">
+                                <span>to</span>
+                                <input type="number" id="max-float" value="25.0" step="1" min="0">
+                            </div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="allow-unknown-float" checked> Allow Unknown Float
+                            </label>
+                        </div>
+
+                        <div class="filter-group">
+                            <label><i class="fa-solid fa-industry"></i> Sector</label>
+                            <select id="sector-filter">
+                                <option value="ALL">All Sectors</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label><i class="fa-solid fa-globe"></i> Country</label>
+                            <select id="country-filter">
+                                <option value="ALL">All Countries</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="summary-bar">
+                <div class="summary-chip">
+                    <span class="chip-label">Scanned Active Tickers:</span>
+                    <span class="chip-val" id="stat-scanned">0</span>
+                </div>
+                <div class="summary-chip">
+                    <span class="chip-label">Flagged Criteria Match:</span>
+                    <span class="chip-val highlight" id="stat-passed">0</span>
+                </div>
+                <div class="summary-chip">
+                    <span class="chip-label">Execution Time:</span>
+                    <span class="chip-val" id="stat-time">0s</span>
+                </div>
+                <div class="summary-chip export-chip">
+                    <button class="btn btn-ghost btn-sm" id="export-csv-btn">
+                        <i class="fa-solid fa-file-csv"></i> Export CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-container glass-card">
+                <table class="data-table" id="screener-table">
+                    <thead>
+                        <tr>
+                            <th class="col-star"><i class="fa-regular fa-star"></i></th>
+                            <th class="sortable" data-sort="ticker">Ticker <i class="fa-solid fa-sort"></i></th>
+                            <th class="sortable" data-sort="country">Country <i class="fa-solid fa-sort"></i></th>
+                            <th class="sortable" data-sort="sector">Sector <i class="fa-solid fa-sort"></i></th>
+                            <th class="sortable num-col" data-sort="price">Price <i class="fa-solid fa-sort"></i></th>
+                            <th class="sortable num-col" data-sort="active_gain">% Gainer <i class="fa-solid fa-sort"></i></th>
+                            <th class="sortable num-col" data-sort="projected_rel_vol">Rel Vol (Time-Adj) <i class="fa-solid fa-sort"></i></th>
+                            <th class="sortable num-col" data-sort="volume">Volume <i class="fa-solid fa-sort"></i></th>
+                            <th class="sortable num-col" data-sort="float_m">Float (Shares) <i class="fa-solid fa-sort"></i></th>
+                            <th class="col-catalyst">Catalyst News</th>
+                        </tr>
+                    </thead>
+                    <tbody id="screener-tbody">
+                        <tr>
+                            <td colspan="10" class="empty-state">
+                                <div class="spinner-box">
+                                    <div class="pulse-spinner"></div>
+                                    <p>Scanning markets for high-momentum plays...</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-backdrop hidden" id="news-modal">
+        <div class="modal-card glass-card">
+            <div class="modal-header">
+                <div class="modal-title-box">
+                    <span class="modal-ticker" id="modal-ticker-symbol">TICKER</span>
+                    <span class="modal-company" id="modal-company-name">Company Name</span>
+                </div>
+                <button class="btn-close" id="close-modal-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" id="modal-news-content">
+            </div>
+            <div class="modal-footer">
+                <a href="#" target="_blank" class="btn btn-yahoo" id="modal-yahoo-link">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> Open Master News Page on Yahoo Finance
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
