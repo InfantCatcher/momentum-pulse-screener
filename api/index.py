@@ -90,7 +90,7 @@ def get_master_ticker_universe() -> List[str]:
                 "User-Agent": "MomentumPulse Screener/1.0 (contact@momentumpulse.com)"
             }
             url = "https://www.sec.gov/files/company_tickers.json"
-            res = requests.get(url, headers=sec_headers, timeout=2.0)
+            res = requests.get(url, headers=sec_headers, timeout=2.5)
             if res.status_code == 200:
                 data = res.json()
                 symbols = set()
@@ -113,7 +113,9 @@ def get_master_ticker_universe() -> List[str]:
         "https://finance.yahoo.com/markets/stocks/losers/?count=100&offset=0",
         "https://finance.yahoo.com/markets/stocks/most-active/?count=100&offset=0",
         "https://finance.yahoo.com/markets/stocks/premarket-gainers/?count=100&offset=0",
-        "https://finance.yahoo.com/markets/stocks/premarket-losers/?count=100&offset=0"
+        "https://finance.yahoo.com/markets/stocks/premarket-losers/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/premarket-most-active/?count=100&offset=0",
+        "https://finance.yahoo.com/markets/stocks/trending/?count=100&offset=0"
     ]
     
     active_scraped = []
@@ -137,7 +139,7 @@ def get_master_ticker_universe() -> List[str]:
         return symbols
 
     try:
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futs = [executor.submit(fetch_url, url) for url in target_urls]
             for f in as_completed(futs):
                 for sym in f.result():
@@ -287,7 +289,8 @@ def screen_stocks(
     min_gain: float = Query(5.0, description="Minimum percentage gain (+/- magnitude)"),
     min_float: float = Query(5.0, description="Minimum float in millions"),
     max_float: float = Query(25.0, description="Maximum float in millions"),
-    allow_unknown_float: bool = Query(True, description="Allow stocks with unknown float")
+    allow_unknown_float: bool = Query(True, description="Allow stocks with unknown float"),
+    limit: int = Query(500, description="Number of tickers to scan per cycle")
 ):
     start_time = time.time()
     session_info = get_market_session_info()
@@ -302,12 +305,12 @@ def screen_stocks(
     if not tickers_universe:
         tickers_universe = FALLBACK_POPULAR_STOCKS
         
-    scan_limit = min(60, len(tickers_universe))
+    scan_limit = min(max(50, limit), len(tickers_universe))
     tickers_to_scan = tickers_universe[:scan_limit]
 
     results = []
     try:
-        with ThreadPoolExecutor(max_workers=15) as executor:
+        with ThreadPoolExecutor(max_workers=35) as executor:
             futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
             for future in as_completed(futures):
                 try:

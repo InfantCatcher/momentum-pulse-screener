@@ -1,8 +1,7 @@
 import os
 import re
 import time
-from datetime import datetime, time as dtime
-from zoneinfo import ZoneInfo
+from datetime import datetime, time as dtime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 
@@ -27,9 +26,22 @@ app.add_middleware(
 SEC_TICKERS_CACHE: List[str] = []
 LAST_SEC_FETCH_TIME: float = 0.0
 
+FALLBACK_POPULAR_STOCKS = [
+    "PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "NIO", "XPEV", "LCID", "BB",
+    "CLSK", "WULF", "HUT", "BITF", "IREN", "CIFR", "SDIG", "MSTR", "COIN", "GME",
+    "AMC", "MULN", "FFIE", "CVNA", "UPST", "AI", "PLTR", "SOFI", "RIVN", "HOOD",
+    "DKNG", "OPEN", "PATH", "STEM", "JOBY", "ACHR", "QS", "LCID", "NKLA", "RIG"
+]
+
 def get_market_session_info() -> Dict[str, Any]:
-    ny_tz = ZoneInfo("America/New_York")
-    now = datetime.now(ny_tz)
+    try:
+        from zoneinfo import ZoneInfo
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
+    except Exception:
+        edt_tz = timezone(timedelta(hours=-4))
+        now = datetime.now(edt_tz)
+
     weekday = now.weekday()
     current_time = now.time()
     
@@ -80,7 +92,7 @@ def get_master_ticker_universe() -> List[str]:
                 "User-Agent": "MomentumPulse Screener/1.0 (contact@momentumpulse.com)"
             }
             url = "https://www.sec.gov/files/company_tickers.json"
-            res = requests.get(url, headers=sec_headers, timeout=3)
+            res = requests.get(url, headers=sec_headers, timeout=2.5)
             if res.status_code == 200:
                 data = res.json()
                 symbols = set()
@@ -91,8 +103,8 @@ def get_master_ticker_universe() -> List[str]:
                 if symbols:
                     SEC_TICKERS_CACHE = sorted(list(symbols))
                     LAST_SEC_FETCH_TIME = now
-        except Exception as e:
-            print(f"SEC EDGAR fetch error: {e}")
+        except Exception:
+            pass
             
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -101,9 +113,7 @@ def get_master_ticker_universe() -> List[str]:
         "https://finance.yahoo.com/markets/stocks/gainers/?count=100&offset=0",
         "https://finance.yahoo.com/markets/stocks/gainers/?count=100&offset=100",
         "https://finance.yahoo.com/markets/stocks/losers/?count=100&offset=0",
-        "https://finance.yahoo.com/markets/stocks/losers/?count=100&offset=100",
         "https://finance.yahoo.com/markets/stocks/most-active/?count=100&offset=0",
-        "https://finance.yahoo.com/markets/stocks/most-active/?count=100&offset=100",
         "https://finance.yahoo.com/markets/stocks/premarket-gainers/?count=100&offset=0",
         "https://finance.yahoo.com/markets/stocks/premarket-losers/?count=100&offset=0",
         "https://finance.yahoo.com/markets/stocks/premarket-most-active/?count=100&offset=0",
@@ -116,7 +126,7 @@ def get_master_ticker_universe() -> List[str]:
     def fetch_url(u):
         symbols = []
         try:
-            r = requests.get(u, headers=headers, timeout=2)
+            r = requests.get(u, headers=headers, timeout=2.0)
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, "html.parser")
                 for link in soup.find_all("a"):
@@ -130,17 +140,25 @@ def get_master_ticker_universe() -> List[str]:
             pass
         return symbols
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futs = [executor.submit(fetch_url, url) for url in target_urls]
-        for f in as_completed(futs):
-            for sym in f.result():
-                if sym not in seen:
-                    seen.add(sym)
-                    active_scraped.append(sym)
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futs = [executor.submit(fetch_url, url) for url in target_urls]
+            for f in as_completed(futs):
+                for sym in f.result():
+                    if sym not in seen:
+                        seen.add(sym)
+                        active_scraped.append(sym)
+    except Exception:
+        pass
             
     combined = list(active_scraped)
     if SEC_TICKERS_CACHE:
         for sym in SEC_TICKERS_CACHE:
+            if sym not in seen:
+                seen.add(sym)
+                combined.append(sym)
+    else:
+        for sym in FALLBACK_POPULAR_STOCKS:
             if sym not in seen:
                 seen.add(sym)
                 combined.append(sym)
@@ -150,8 +168,13 @@ def get_master_ticker_universe() -> List[str]:
 def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float, is_premarket: bool) -> Optional[Dict[str, Any]]:
     try:
         t = yf.Ticker(ticker_symbol)
-        info = t.info
-        if not info:
+        info = None
+        try:
+            info = t.info
+        except Exception:
+            return None
+            
+        if not isinstance(info, dict) or not info:
             return None
             
         prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
@@ -205,26 +228,29 @@ def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float, is_pre
         country = info.get("country") or "Unknown"
         company_name = info.get("shortName") or info.get("longName") or ticker_symbol
         
-        raw_news = t.news or []
         formatted_news = []
-        for item in raw_news[:5]:
-            c = item.get("content", {})
-            if isinstance(c, dict):
-                title = c.get("title")
-                pub_date = c.get("pubDate")
-                provider = c.get("provider", {}).get("displayName") if isinstance(c.get("provider"), dict) else "Yahoo Finance"
-                click_url = c.get("clickThroughUrl", {}).get("url") if isinstance(c.get("clickThroughUrl"), dict) else None
-                canon_url = c.get("canonicalUrl", {}).get("url") if isinstance(c.get("canonicalUrl"), dict) else None
-                article_url = click_url or canon_url or f"https://finance.yahoo.com/quote/{ticker_symbol}/news"
-                
-                if title:
-                    formatted_news.append({
-                        "id": item.get("id"),
-                        "title": title,
-                        "publisher": provider,
-                        "pub_date": pub_date,
-                        "url": article_url
-                    })
+        try:
+            raw_news = t.news or []
+            for item in raw_news[:5]:
+                c = item.get("content", {})
+                if isinstance(c, dict):
+                    title = c.get("title")
+                    pub_date = c.get("pubDate")
+                    provider = c.get("provider", {}).get("displayName") if isinstance(c.get("provider"), dict) else "Yahoo Finance"
+                    click_url = c.get("clickThroughUrl", {}).get("url") if isinstance(c.get("clickThroughUrl"), dict) else None
+                    canon_url = c.get("canonicalUrl", {}).get("url") if isinstance(c.get("canonicalUrl"), dict) else None
+                    article_url = click_url or canon_url or f"https://finance.yahoo.com/quote/{ticker_symbol}/news"
+                    
+                    if title:
+                        formatted_news.append({
+                            "id": item.get("id"),
+                            "title": title,
+                            "publisher": provider,
+                            "pub_date": pub_date,
+                            "url": article_url
+                        })
+        except Exception:
+            pass
                     
         yahoo_overview_url = f"https://finance.yahoo.com/quote/{ticker_symbol}/news"
         
@@ -250,7 +276,7 @@ def fetch_single_ticker_data(ticker_symbol: str, elapsed_fraction: float, is_pre
             "yahoo_url": yahoo_overview_url,
             "news": formatted_news
         }
-    except Exception as e:
+    except Exception:
         return None
 
 @app.get("/api/status")
@@ -265,48 +291,62 @@ def screen_stocks(
     min_gain: float = Query(5.0, description="Minimum percentage gain (+/- magnitude)"),
     min_float: float = Query(5.0, description="Minimum float in millions"),
     max_float: float = Query(25.0, description="Maximum float in millions"),
-    allow_unknown_float: bool = Query(True, description="Allow stocks with unknown float")
+    allow_unknown_float: bool = Query(True, description="Allow stocks with unknown float"),
+    limit: int = Query(500, description="Number of tickers to scan per cycle")
 ):
     start_time = time.time()
     session_info = get_market_session_info()
     elapsed_fraction = session_info["elapsed_fraction"]
     is_premarket = session_info["is_premarket"]
     
-    tickers_universe = get_master_ticker_universe()
+    try:
+        tickers_universe = get_master_ticker_universe()
+    except Exception:
+        tickers_universe = FALLBACK_POPULAR_STOCKS
+
     if not tickers_universe:
-        tickers_universe = ["PLBL", "MARA", "RIOT", "SOUN", "BBAI", "SMCI", "SOUND", "NIO", "XPEV", "LCID"]
+        tickers_universe = FALLBACK_POPULAR_STOCKS
         
-    scan_limit = min(150, len(tickers_universe))
+    scan_limit = min(max(50, limit), len(tickers_universe))
     tickers_to_scan = tickers_universe[:scan_limit]
 
     results = []
-    with ThreadPoolExecutor(max_workers=30) as executor:
-        futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
-        for future in as_completed(futures):
-            res = future.result()
-            if res:
-                results.append(res)
+    try:
+        with ThreadPoolExecutor(max_workers=35) as executor:
+            futures = {executor.submit(fetch_single_ticker_data, sym, elapsed_fraction, is_premarket): sym for sym in tickers_to_scan}
+            for future in as_completed(futures):
+                try:
+                    res = future.result()
+                    if res:
+                        results.append(res)
+                except Exception:
+                    pass
+    except Exception as e:
+        print("Batch fetch exception:", e)
                 
     filtered = []
     for item in results:
-        if not (min_price <= item["price"] <= max_price):
-            continue
-            
-        if abs(item["reg_gain"]) < min_gain and abs(item["pre_gain"]) < min_gain:
-            continue
-            
-        if item["projected_rel_vol"] < min_rel_vol and item["raw_rel_vol"] < min_rel_vol:
-            continue
-            
-        float_m = item["float_m"]
-        if float_m is None:
-            if not allow_unknown_float:
-                continue
-        else:
-            if not (min_float <= float_m <= max_float):
+        try:
+            if not (min_price <= item["price"] <= max_price):
                 continue
                 
-        filtered.append(item)
+            if abs(item["reg_gain"]) < min_gain and abs(item["pre_gain"]) < min_gain:
+                continue
+                
+            if item["projected_rel_vol"] < min_rel_vol and item["raw_rel_vol"] < min_rel_vol:
+                continue
+                
+            float_m = item["float_m"]
+            if float_m is None:
+                if not allow_unknown_float:
+                    continue
+            else:
+                if not (min_float <= float_m <= max_float):
+                    continue
+                    
+            filtered.append(item)
+        except Exception:
+            pass
         
     execution_time = round(time.time() - start_time, 2)
     
